@@ -1,0 +1,42 @@
+{
+  "routeId": "demo-route-1",
+  "routeName": "Demo Regional Tasting Loop",
+  "center": {
+    "lat": -1.2921,
+    "lng": 36.8219
+  },
+  "stops": [
+    {
+      "id": "stop-1",
+      "name": "Welcome Center",
+      "sequence": 1,
+      "lat": -1.2921,
+      "lng": 36.8219,
+      "scheduledTime": "10:00"
+    },
+    {
+      "id": "stop-2",
+      "name": "North Tasting Room",
+      "sequence": 2,
+      "lat": -1.2864,
+      "lng": 36.8172,
+      "scheduledTime": "10:15"
+    },
+    {
+      "id": "stop-3",
+      "name": "Vineyard Gate",
+      "sequence": 3,
+      "lat": -1.2812,
+      "lng": 36.8264,
+      "scheduledTime": "10:30"
+    },
+    {
+      "id": "stop-4",
+      "name": "Market Return",
+      "sequence": 4,
+      "lat": -1.2948,
+      "lng": 36.8322,
+      "scheduledTime": "10:45"
+    }
+  ]
+}

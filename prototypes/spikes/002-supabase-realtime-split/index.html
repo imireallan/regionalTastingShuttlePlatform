@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spike 002 — Supabase Realtime Split</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #07110f;
+        color: #ecfdf5;
+      }
+
+      body {
+        margin: 0;
+        padding: 16px;
+        background: radial-gradient(circle at top left, #153e35 0, #07110f 42%, #020403 100%);
+      }
+
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: 26px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        font-size: 18px;
+      }
+
+      p, .small {
+        color: #a7f3d0;
+      }
+
+      .small {
+        font-size: 12px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 12px;
+        margin: 16px 0;
+      }
+
+      .card {
+        border: 1px solid rgba(110, 231, 183, 0.22);
+        background: rgba(6, 78, 59, 0.32);
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24);
+      }
+
+      label {
+        display: block;
+        color: #6ee7b7;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin: 10px 0 5px;
+      }
+
+      input, select {
+        box-sizing: border-box;
+        width: 100%;
+        border: 1px solid rgba(167, 243, 208, 0.25);
+        background: rgba(2, 44, 34, 0.85);
+        color: #ecfdf5;
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 14px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 12px 0;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 11px 15px;
+        font-size: 14px;
+        font-weight: 750;
+        cursor: pointer;
+        color: #022c22;
+        background: #34d399;
+      }
+
+      button.secondary {
+        color: #d1fae5;
+        background: rgba(209, 250, 229, 0.12);
+        border: 1px solid rgba(209, 250, 229, 0.24);
+      }
+
+      button.danger {
+        color: #fff7ed;
+        background: #ea580c;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 12px;
+        font-size: 13px;
+      }
+
+      th, td {
+        border-bottom: 1px solid rgba(167, 243, 208, 0.12);
+        padding: 9px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: #a7f3d0;
+        background: rgba(6, 78, 59, 0.45);
+      }
+
+      .metric {
+        font-size: 24px;
+        font-weight: 800;
+      }
+
+      .ok { color: #34d399; }
+      .warn { color: #fbbf24; }
+      .bad { color: #fb7185; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Supabase Realtime Split Spike</h1>
+      <p>Broadcast GPS is ephemeral. Stop logs are durable Postgres events. Use a non-production Supabase project and anon key only.</p>
+
+      <section class="card">
+        <h2>Connection</h2>
+        <div class="grid">
+          <div>
+            <label for="supabaseUrl">Supabase URL</label>
+            <input id="supabaseUrl" placeholder="https://your-project.supabase.co" autocomplete="off" />
+          </div>
+          <div>
+            <label for="supabaseAnonKey">Supabase anon key</label>
+            <input id="supabaseAnonKey" placeholder="eyJ..." autocomplete="off" />
+          </div>
+          <div>
+            <label for="routeId">Route ID / channel scope</label>
+            <input id="routeId" value="demo-route-1" />
+          </div>
+        </div>
+        <div class="controls">
+          <button id="connectButton">Connect</button>
+          <button id="disconnectButton" class="danger">Disconnect</button>
+          <button id="saveConfigButton" class="secondary">Save locally</button>
+          <button id="clearConfigButton" class="secondary">Clear saved config</button>
+        </div>
+        <div>Status: <strong id="connectionStatus" class="warn">not connected</strong></div>
+        <div class="small">Saved config uses localStorage on this machine only. Never paste a service role key here.</div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Driver broadcaster</h2>
+          <label for="busCount">Bus count</label>
+          <select id="busCount">
+            <option value="1">1 bus</option>
+            <option value="2">2 buses</option>
+            <option value="4">4 buses</option>
+          </select>
+          <label for="broadcastInterval">Broadcast interval</label>
+          <select id="broadcastInterval">
+            <option value="3000">3 seconds</option>
+            <option value="5000">5 seconds</option>
+          </select>
+          <div class="controls">
+            <button id="startBroadcastButton">Start broadcast</button>
+            <button id="stopBroadcastButton" class="danger">Stop broadcast</button>
+          </div>
+          <div>Messages sent: <span id="sentCount" class="metric ok">0</span></div>
+          <div>Channel: <span id="broadcastChannelName" class="mono">—</span></div>
+        </div>
+
+        <div class="card">
+          <h2>Rider/admin subscriber</h2>
+          <div class="controls">
+            <button id="subscribePositionsButton">Subscribe positions</button>
+            <button id="unsubscribePositionsButton" class="danger">Unsubscribe positions</button>
+          </div>
+          <div>Messages received: <span id="receivedCount" class="metric ok">0</span></div>
+          <div>Last latency: <span id="lastLatency" class="metric warn">—</span></div>
+          <div>Channel: <span id="subscriberChannelName" class="mono">—</span></div>
+        </div>
+
+        <div class="card">
+          <h2>Stop-log listener</h2>
+          <div class="controls">
+            <button id="subscribeStopLogsButton">Subscribe stop_logs</button>
+            <button id="insertStopLogButton" class="secondary">Insert test stop_log via RPC</button>
+            <button id="unsubscribeStopLogsButton" class="danger">Unsubscribe stop_logs</button>
+          </div>
+          <div>Stop-log events: <span id="stopLogCount" class="metric ok">0</span></div>
+          <div class="small">Insert button expects optional RPC `spike_insert_stop_log`. Listener works without it if records are inserted elsewhere.</div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Latest bus positions</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Bus</th>
+                <th>Position</th>
+                <th>Seq</th>
+                <th>Latency</th>
+                <th>Received</th>
+              </tr>
+            </thead>
+            <tbody id="positionsBody"></tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>Stop-log events</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Event</th>
+                <th>Record</th>
+              </tr>
+            </thead>
+            <tbody id="stopLogsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Event log</h2>
+        <div class="controls">
+          <button id="exportButton" class="secondary">Export JSON</button>
+          <button id="clearLogButton" class="secondary">Clear log</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Type</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      const routeShape = [
+        { lat: -1.2921, lng: 36.8219 },
+        { lat: -1.2864, lng: 36.8172 },
+        { lat: -1.2812, lng: 36.8264 },
+        { lat: -1.2948, lng: 36.8322 },
+      ];
+
+      const state = {
+        supabase: null,
+        broadcastChannel: null,
+        subscriberChannel: null,
+        stopLogChannel: null,
+        broadcastTimer: null,
+        sequence: 0,
+        sentCount: 0,
+        receivedCount: 0,
+        stopLogCount: 0,
+        positions: new Map(),
+        logs: [],
+      };
+
+      function routeChannelName() {
+        return `route:${$("routeId").value.trim() || "demo-route-1"}:positions`;
+      }
+
+      function setStatus(message, className = "warn") {
+        $("connectionStatus").textContent = message;
+        $("connectionStatus").className = className;
+      }
+
+      function log(type, details = {}) {
+        const entry = { at: new Date().toISOString(), type, details };
+        state.logs.unshift(entry);
+        renderLogs();
+        console.log("[realtime-split-spike]", entry);
+      }
+
+      function renderLogs() {
+        $("logBody").innerHTML = state.logs.slice(0, 200).map((entry) => (
+          `<tr><td>${entry.at}</td><td>${entry.type}</td><td>${escapeHtml(JSON.stringify(entry.details))}</td></tr>`
+        )).join("");
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function loadSavedConfig() {
+        const raw = localStorage.getItem("rts-spike-002-config");
+        if (!raw) return;
+        try {
+          const config = JSON.parse(raw);
+          $("supabaseUrl").value = config.url || "";
+          $("supabaseAnonKey").value = config.anonKey || "";
+          $("routeId").value = config.routeId || "demo-route-1";
+          log("config-loaded");
+        } catch (error) {
+          log("config-load-error", { message: error.message });
+        }
+      }
+
+      function saveConfig() {
+        localStorage.setItem("rts-spike-002-config", JSON.stringify({
+          url: $("supabaseUrl").value.trim(),
+          anonKey: $("supabaseAnonKey").value.trim(),
+          routeId: $("routeId").value.trim(),
+        }));
+        log("config-saved");
+      }
+
+      function connect() {
+        const url = $("supabaseUrl").value.trim();
+        const anonKey = $("supabaseAnonKey").value.trim();
+        if (!url || !anonKey) {
+          setStatus("missing URL or anon key", "bad");
+          log("connect-failed", { reason: "missing URL or anon key" });
+          return;
+        }
+        if (!window.supabase?.createClient) {
+          setStatus("Supabase JS CDN failed to load", "bad");
+          log("connect-failed", { reason: "supabase-js missing" });
+          return;
+        }
+        state.supabase = window.supabase.createClient(url, anonKey, {
+          realtime: { params: { eventsPerSecond: 20 } },
+        });
+        setStatus("client created", "ok");
+        log("client-created", { url, routeChannel: routeChannelName() });
+      }
+
+      async function disconnect() {
+        stopBroadcast();
+        await unsubscribePositions();
+        await unsubscribeStopLogs();
+        state.supabase = null;
+        setStatus("disconnected", "warn");
+        log("client-disconnected");
+      }
+
+      function requireClient() {
+        if (!state.supabase) {
+          connect();
+        }
+        if (!state.supabase) {
+          throw new Error("Supabase client not connected");
+        }
+        return state.supabase;
+      }
+
+      function busPosition(busIndex, sequence) {
+        const segment = (sequence + busIndex * 4) % routeShape.length;
+        const nextSegment = (segment + 1) % routeShape.length;
+        const t = ((sequence % 10) + 1) / 10;
+        const start = routeShape[segment];
+        const end = routeShape[nextSegment];
+        return {
+          lat: start.lat + (end.lat - start.lat) * t,
+          lng: start.lng + (end.lng - start.lng) * t,
+        };
+      }
+
+      function buildPayload(busIndex) {
+        const position = busPosition(busIndex, state.sequence);
+        return {
+          route_id: $("routeId").value.trim() || "demo-route-1",
+          bus_id: `bus-${busIndex + 1}`,
+          lat: Number(position.lat.toFixed(6)),
+          lng: Number(position.lng.toFixed(6)),
+          accuracy_m: 8 + busIndex,
+          heading: (state.sequence * 18 + busIndex * 45) % 360,
+          speed_mps: 6 + busIndex,
+          seq: state.sequence,
+          sent_at: new Date().toISOString(),
+        };
+      }
+
+      async function startBroadcast() {
+        const supabase = requireClient();
+        stopBroadcast();
+        const channelName = routeChannelName();
+        state.broadcastChannel = supabase.channel(channelName, {
+          config: { broadcast: { self: true, ack: true } },
+        });
+        $("broadcastChannelName").textContent = channelName;
+
+        state.broadcastChannel.subscribe((status, error) => {
+          log("broadcast-channel-status", { status, error: error?.message });
+        });
+
+        const intervalMs = Number($("broadcastInterval").value);
+        const sendTick = async () => {
+          const busCount = Number($("busCount").value);
+          state.sequence += 1;
+          for (let index = 0; index < busCount; index += 1) {
+            const payload = buildPayload(index);
+            const result = await state.broadcastChannel.send({
+              type: "broadcast",
+              event: "position",
+              payload,
+            });
+            state.sentCount += 1;
+            $("sentCount").textContent = String(state.sentCount);
+            log("position-broadcast", { bus_id: payload.bus_id, seq: payload.seq, result });
+          }
+        };
+
+        await sendTick();
+        state.broadcastTimer = window.setInterval(sendTick, intervalMs);
+        log("broadcast-started", { channelName, intervalMs });
+      }
+
+      function stopBroadcast() {
+        if (state.broadcastTimer) {
+          window.clearInterval(state.broadcastTimer);
+          state.broadcastTimer = null;
+        }
+        if (state.broadcastChannel && state.supabase) {
+          state.supabase.removeChannel(state.broadcastChannel);
+          state.broadcastChannel = null;
+        }
+        log("broadcast-stopped");
+      }
+
+      async function subscribePositions() {
+        const supabase = requireClient();
+        await unsubscribePositions();
+        const channelName = routeChannelName();
+        $("subscriberChannelName").textContent = channelName;
+        state.subscriberChannel = supabase.channel(channelName, {
+          config: { broadcast: { self: true, ack: true } },
+        });
+
+        state.subscriberChannel
+          .on("broadcast", { event: "position" }, ({ payload }) => {
+            const receivedAt = Date.now();
+            const sentAt = Date.parse(payload.sent_at);
+            const latencyMs = Number.isFinite(sentAt) ? receivedAt - sentAt : null;
+            state.receivedCount += 1;
+            state.positions.set(payload.bus_id, { ...payload, latencyMs, receivedAt: new Date(receivedAt).toISOString() });
+            $("receivedCount").textContent = String(state.receivedCount);
+            $("lastLatency").textContent = latencyMs === null ? "unknown" : `${latencyMs}ms`;
+            $("lastLatency").className = latencyMs !== null && latencyMs < 750 ? "metric ok" : "metric warn";
+            renderPositions();
+            log("position-received", { bus_id: payload.bus_id, seq: payload.seq, latencyMs });
+          })
+          .subscribe((status, error) => {
+            log("subscriber-channel-status", { status, error: error?.message });
+          });
+      }
+
+      async function unsubscribePositions() {
+        if (state.subscriberChannel && state.supabase) {
+          await state.supabase.removeChannel(state.subscriberChannel);
+          state.subscriberChannel = null;
+          log("positions-unsubscribed");
+        }
+      }
+
+      function renderPositions() {
+        const rows = Array.from(state.positions.values()).sort((a, b) => a.bus_id.localeCompare(b.bus_id));
+        $("positionsBody").innerHTML = rows.map((position) => (
+          `<tr><td>${position.bus_id}</td><td>${position.lat}, ${position.lng}</td><td>${position.seq}</td><td>${position.latencyMs}ms</td><td>${position.receivedAt}</td></tr>`
+        )).join("");
+      }
+
+      async function subscribeStopLogs() {
+        const supabase = requireClient();
+        await unsubscribeStopLogs();
+        state.stopLogChannel = supabase
+          .channel("stop_logs_changes")
+          .on("postgres_changes", { event: "*", schema: "public", table: "stop_logs" }, (payload) => {
+            state.stopLogCount += 1;
+            $("stopLogCount").textContent = String(state.stopLogCount);
+            prependStopLog(payload);
+            log("stop-log-change", { eventType: payload.eventType, new: payload.new, old: payload.old });
+          })
+          .subscribe((status, error) => {
+            log("stop-log-channel-status", { status, error: error?.message });
+          });
+      }
+
+      async function unsubscribeStopLogs() {
+        if (state.stopLogChannel && state.supabase) {
+          await state.supabase.removeChannel(state.stopLogChannel);
+          state.stopLogChannel = null;
+          log("stop-logs-unsubscribed");
+        }
+      }
+
+      function prependStopLog(payload) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td>${new Date().toISOString()}</td><td>${payload.eventType}</td><td>${escapeHtml(JSON.stringify(payload.new || payload.old))}</td>`;
+        $("stopLogsBody").prepend(row);
+      }
+
+      async function insertStopLog() {
+        const supabase = requireClient();
+        const { data, error } = await supabase.rpc("spike_insert_stop_log", {
+          p_route_id: $("routeId").value.trim() || "demo-route-1",
+          p_bus_id: "bus-1",
+          p_stop_id: "stop-1",
+          p_boarded: Math.floor(Math.random() * 4),
+          p_alighted: Math.floor(Math.random() * 3),
+        });
+        if (error) {
+          log("stop-log-insert-error", { message: error.message, details: error.details, hint: error.hint });
+          return;
+        }
+        log("stop-log-inserted", { data });
+      }
+
+      function exportLogs() {
+        const payload = {
+          exportedAt: new Date().toISOString(),
+          userAgent: navigator.userAgent,
+          routeId: $("routeId").value.trim(),
+          sentCount: state.sentCount,
+          receivedCount: state.receivedCount,
+          stopLogCount: state.stopLogCount,
+          positions: Array.from(state.positions.values()),
+          logs: state.logs.slice().reverse(),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `supabase-realtime-split-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        log("logs-exported", { count: state.logs.length });
+      }
+
+      $("connectButton").addEventListener("click", connect);
+      $("disconnectButton").addEventListener("click", disconnect);
+      $("saveConfigButton").addEventListener("click", saveConfig);
+      $("clearConfigButton").addEventListener("click", () => {
+        localStorage.removeItem("rts-spike-002-config");
+        log("config-cleared");
+      });
+      $("startBroadcastButton").addEventListener("click", startBroadcast);
+      $("stopBroadcastButton").addEventListener("click", stopBroadcast);
+      $("subscribePositionsButton").addEventListener("click", subscribePositions);
+      $("unsubscribePositionsButton").addEventListener("click", unsubscribePositions);
+      $("subscribeStopLogsButton").addEventListener("click", subscribeStopLogs);
+      $("unsubscribeStopLogsButton").addEventListener("click", unsubscribeStopLogs);
+      $("insertStopLogButton").addEventListener("click", insertStopLog);
+      $("exportButton").addEventListener("click", exportLogs);
+      $("clearLogButton").addEventListener("click", () => {
+        state.logs = [];
+        renderLogs();
+        log("logs-cleared");
+      });
+
+      window.addEventListener("online", () => log("network-online"));
+      window.addEventListener("offline", () => log("network-offline"));
+      document.addEventListener("visibilitychange", () => log("visibility-change", { visibility: document.visibilityState }));
+
+      loadSavedConfig();
+      log("page-loaded", { hasSupabaseCdn: Boolean(window.supabase?.createClient) });
+    </script>
+  </body>
+</html>

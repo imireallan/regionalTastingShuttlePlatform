@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spike 001 — Wake Lock + Kiosk</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #07110f;
+        color: #ecfdf5;
+      }
+
+      body {
+        margin: 0;
+        padding: 16px;
+        background: radial-gradient(circle at top left, #12352d 0, #07110f 40%, #030706 100%);
+      }
+
+      main {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: 26px;
+      }
+
+      p {
+        color: #a7f3d0;
+        margin: 0 0 16px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 12px;
+        margin: 16px 0;
+      }
+
+      .card {
+        border: 1px solid rgba(110, 231, 183, 0.22);
+        background: rgba(6, 78, 59, 0.32);
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24);
+      }
+
+      .label {
+        color: #6ee7b7;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .value {
+        margin-top: 6px;
+        font-size: 22px;
+        font-weight: 750;
+        word-break: break-word;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 18px 0;
+      }
+
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 13px 18px;
+        font-size: 15px;
+        font-weight: 750;
+        cursor: pointer;
+        color: #022c22;
+        background: #34d399;
+      }
+
+      button.secondary {
+        color: #d1fae5;
+        background: rgba(209, 250, 229, 0.12);
+        border: 1px solid rgba(209, 250, 229, 0.24);
+      }
+
+      button.danger {
+        color: #fff7ed;
+        background: #ea580c;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 12px;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid rgba(167, 243, 208, 0.12);
+        padding: 9px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: #a7f3d0;
+        background: rgba(6, 78, 59, 0.45);
+      }
+
+      .ok { color: #34d399; }
+      .warn { color: #fbbf24; }
+      .bad { color: #fb7185; }
+
+      .small {
+        font-size: 12px;
+        color: #a7f3d0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Wake Lock + Fully Kiosk Reliability Spike</h1>
+      <p>Use this on the target Android tablet/Fully Kiosk setup. Local desktop success is only a sanity check.</p>
+
+      <section class="controls">
+        <button id="startButton">Start tracking</button>
+        <button id="stopButton" class="danger">Stop</button>
+        <button id="wakeButton" class="secondary">Request wake lock</button>
+        <button id="exportButton" class="secondary">Export logs JSON</button>
+        <button id="clearButton" class="secondary">Clear logs</button>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <div class="label">Secure context</div>
+          <div id="secureContext" class="value">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Wake lock</div>
+          <div id="wakeState" class="value">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Geolocation</div>
+          <div id="geoState" class="value">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Network</div>
+          <div id="networkState" class="value">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Visibility</div>
+          <div id="visibilityState" class="value">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Samples</div>
+          <div id="sampleCount" class="value">0</div>
+        </div>
+        <div class="card">
+          <div class="label">Last position</div>
+          <div id="lastPosition" class="value">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Timer drift</div>
+          <div id="timerDrift" class="value">—</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="label">Event log</div>
+        <p class="small">Export this after tablet field testing and paste findings into docs/spikes.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Type</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        logs: [],
+        watchId: null,
+        intervalId: null,
+        wakeLock: null,
+        samples: 0,
+        lastTickAt: null,
+        expectedIntervalMs: 5000,
+      };
+
+      const el = (id) => document.getElementById(id);
+
+      function setText(id, value, className = "") {
+        const node = el(id);
+        node.textContent = value;
+        node.className = `value ${className}`;
+      }
+
+      function log(type, details = {}) {
+        const entry = {
+          at: new Date().toISOString(),
+          type,
+          details,
+          visibility: document.visibilityState,
+          online: navigator.onLine,
+        };
+        state.logs.unshift(entry);
+        renderLogs();
+        console.log("[wake-kiosk-spike]", entry);
+      }
+
+      function renderLogs() {
+        el("logBody").innerHTML = state.logs
+          .slice(0, 200)
+          .map((entry) => {
+            const detailText = JSON.stringify(entry.details);
+            return `<tr><td>${entry.at}</td><td>${entry.type}</td><td>${detailText}</td></tr>`;
+          })
+          .join("");
+      }
+
+      function refreshStaticState() {
+        setText("secureContext", window.isSecureContext ? "yes" : "no", window.isSecureContext ? "ok" : "bad");
+        setText("networkState", navigator.onLine ? "online" : "offline", navigator.onLine ? "ok" : "bad");
+        setText("visibilityState", document.visibilityState, document.visibilityState === "visible" ? "ok" : "warn");
+        setText("sampleCount", String(state.samples));
+      }
+
+      async function requestWakeLock() {
+        if (!("wakeLock" in navigator)) {
+          setText("wakeState", "unsupported", "warn");
+          log("wake-lock-unsupported");
+          return;
+        }
+
+        try {
+          state.wakeLock = await navigator.wakeLock.request("screen");
+          setText("wakeState", "active", "ok");
+          log("wake-lock-acquired");
+          state.wakeLock.addEventListener("release", () => {
+            setText("wakeState", "released", "warn");
+            log("wake-lock-released");
+          });
+        } catch (error) {
+          setText("wakeState", "failed", "bad");
+          log("wake-lock-error", { name: error.name, message: error.message });
+        }
+      }
+
+      function startTracking() {
+        if (!("geolocation" in navigator)) {
+          setText("geoState", "unsupported", "bad");
+          log("geolocation-unsupported");
+          return;
+        }
+
+        if (state.watchId !== null) {
+          log("tracking-already-started");
+          return;
+        }
+
+        setText("geoState", "requesting", "warn");
+        log("tracking-start-requested");
+        requestWakeLock();
+
+        state.watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            state.samples += 1;
+            const coords = position.coords;
+            setText("geoState", "active", "ok");
+            setText("sampleCount", String(state.samples));
+            setText(
+              "lastPosition",
+              `${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)} ±${Math.round(coords.accuracy)}m`,
+              "ok"
+            );
+            log("position", {
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              accuracy: coords.accuracy,
+              speed: coords.speed,
+              heading: coords.heading,
+              timestamp: position.timestamp,
+            });
+          },
+          (error) => {
+            setText("geoState", error.code === 1 ? "permission denied" : "error", "bad");
+            log("geolocation-error", { code: error.code, message: error.message });
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000,
+          }
+        );
+
+        state.lastTickAt = performance.now();
+        state.intervalId = window.setInterval(() => {
+          const now = performance.now();
+          const drift = Math.round(now - state.lastTickAt - state.expectedIntervalMs);
+          state.lastTickAt = now;
+          setText("timerDrift", `${drift}ms`, Math.abs(drift) < 750 ? "ok" : "warn");
+          log("heartbeat", { driftMs: drift });
+        }, state.expectedIntervalMs);
+      }
+
+      function stopTracking() {
+        if (state.watchId !== null) {
+          navigator.geolocation.clearWatch(state.watchId);
+          state.watchId = null;
+        }
+        if (state.intervalId !== null) {
+          window.clearInterval(state.intervalId);
+          state.intervalId = null;
+        }
+        if (state.wakeLock) {
+          state.wakeLock.release().catch(() => {});
+          state.wakeLock = null;
+        }
+        setText("geoState", "stopped", "warn");
+        log("tracking-stopped");
+      }
+
+      function exportLogs() {
+        const payload = {
+          exportedAt: new Date().toISOString(),
+          userAgent: navigator.userAgent,
+          secureContext: window.isSecureContext,
+          logs: state.logs.slice().reverse(),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `wake-kiosk-spike-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        log("logs-exported", { count: state.logs.length });
+      }
+
+      window.addEventListener("online", () => {
+        refreshStaticState();
+        log("network-online");
+      });
+
+      window.addEventListener("offline", () => {
+        refreshStaticState();
+        log("network-offline");
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        refreshStaticState();
+        log("visibility-change", { visibility: document.visibilityState });
+        if (document.visibilityState === "visible" && state.watchId !== null) {
+          requestWakeLock();
+        }
+      });
+
+      el("startButton").addEventListener("click", startTracking);
+      el("stopButton").addEventListener("click", stopTracking);
+      el("wakeButton").addEventListener("click", requestWakeLock);
+      el("exportButton").addEventListener("click", exportLogs);
+      el("clearButton").addEventListener("click", () => {
+        state.logs = [];
+        renderLogs();
+        log("logs-cleared");
+      });
+
+      refreshStaticState();
+      setText("wakeState", "not requested", "warn");
+      setText("geoState", "not started", "warn");
+      setText("timerDrift", "not started", "warn");
+      log("page-loaded", { userAgent: navigator.userAgent });
+    </script>
+  </body>
+</html>
