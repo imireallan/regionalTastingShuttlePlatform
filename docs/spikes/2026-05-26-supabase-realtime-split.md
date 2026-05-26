@@ -29,10 +29,10 @@ It includes:
 
 ## Test setup
 
-- Device/browser: local desktop static smoke test so far
-- Supabase project: not connected yet
+- Device/browser: local desktop browser test
+- Supabase project: test project connected with browser-safe publishable/anon key
 - Region: fake demo coordinates from shared sample route
-- Network: local static server
+- Network: local static server with Wi-Fi toggled offline/online
 - Test data: fake moving bus payloads generated in browser
 
 ## Pressure tests
@@ -68,11 +68,29 @@ HTTP 200
 prototype 002 smoke test passed
 ```
 
-The prototype is ready for real Supabase validation, but no production decision can be made until connected to a test Supabase project.
+Desktop Supabase-connected observation from Allan:
+
+- Event logs were exported from the 002 prototype.
+- Reconnection after Wi-Fi offline/online toggle appeared almost immediate.
+- Manual resubscription was only needed when the subscription tab itself was closed and a new tab was opened.
+- Manual resubscription was not needed for normal offline/online toggling.
+- While offline, the broadcaster-side event log kept streaming local broadcast/send events.
+- During Wi-Fi toggling, sent message count became higher than received message count.
+- The separate durable `stop_logs` Postgres Changes listener fired successfully when a stop log was inserted.
+
+Interpretation:
+
+- Reconnect behavior looks promising for desktop browser testing.
+- The sent-vs-received mismatch during offline periods is expected for ephemeral Broadcast: messages emitted while the subscriber/network is unavailable should not be treated as durable queued events.
+- Production UI should show stale/last-seen state and not imply every GPS ping is guaranteed delivery.
+- This supports the architecture principle: GPS is live ephemeral state; stop logs remain the durable source of business truth.
+- The core realtime split is working on desktop: Broadcast handles live positions, and Postgres Changes separately reports durable stop events.
+
+No final production verdict yet. We still need the same test on target mobile/tablet network conditions.
 
 ## Decision
 
-PENDING REAL SUPABASE TEST
+PARTIAL — DESKTOP REALTIME SPLIT VALIDATED; TABLET/MOBILE NETWORK BEHAVIOR STILL PENDING
 
 ## Recommendation
 
@@ -97,8 +115,8 @@ Likely production modules affected:
 
 ## Risks remaining
 
-- Reconnect behavior not yet measured.
-- Real Supabase latency not yet measured.
+- Real Supabase desktop Broadcast reconnect looks promising, but mobile/tablet network behavior is not yet tested.
+- Real Supabase latency range/average has not yet been summarized from exported logs.
 - RLS/private-channel design not yet tested.
-- Postgres Changes setup depends on Supabase publication/RLS policy configuration.
 - Browser/tab behavior on mobile network not yet tested.
+- Production needs stale-position UI because Broadcast can drop messages while offline; sent count can exceed received count by design.
