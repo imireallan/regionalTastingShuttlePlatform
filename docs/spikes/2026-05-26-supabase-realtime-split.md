@@ -1,4 +1,31 @@
-# Spike: Supabase Realtime Split
+# Spike 002: Supabase Realtime Split
+
+<table>
+  <tr>
+    <td><strong>Status</strong></td>
+    <td><span style="color:#f59e0b"><strong>PARTIAL — DESKTOP REALTIME SPLIT VALIDATED</strong></span></td>
+  </tr>
+  <tr>
+    <td><strong>Risk level</strong></td>
+    <td><span style="color:#f59e0b"><strong>Medium</strong></span> — tablet/mobile network behavior still pending</td>
+  </tr>
+  <tr>
+    <td><strong>Architecture signal</strong></td>
+    <td><span style="color:#16a34a"><strong>Positive</strong></span> — Broadcast + Postgres Changes split works on desktop</td>
+  </tr>
+</table>
+
+## Executive summary
+
+| Item | Result |
+|---|---|
+| Broadcast GPS path | <span style="color:#16a34a"><strong>Working on desktop</strong></span> |
+| Postgres Changes stop-log path | <span style="color:#16a34a"><strong>Working</strong></span> |
+| Wi-Fi offline/online reconnect | <span style="color:#16a34a"><strong>Almost immediate</strong></span> |
+| Manual resubscription after Wi-Fi toggle | <span style="color:#16a34a"><strong>Not required</strong></span> |
+| Manual resubscription after closing tab | <span style="color:#f59e0b"><strong>Required / expected</strong></span> |
+| Sent count vs received count while offline | <span style="color:#f59e0b"><strong>Mismatch observed / expected</strong></span> |
+| Tablet/mobile network test | <span style="color:#dc2626"><strong>Pending</strong></span> |
 
 ## Question
 
@@ -10,57 +37,61 @@ The MVP architecture depends on splitting high-frequency, disposable GPS state f
 
 ## Prototype
 
-Created standalone browser prototype:
+| Field | Details |
+|---|---|
+| Prototype path | `prototypes/spikes/002-supabase-realtime-split/index.html` |
+| Run URL | `http://localhost:4173/002-supabase-realtime-split/` |
+| Evidence output | Exportable JSON event logs |
+| Supabase key type | Browser-safe publishable/anon key only |
 
-```text
-prototypes/spikes/002-supabase-realtime-split/index.html
-```
+Prototype capabilities:
 
-It includes:
-
-- Supabase URL + anon key connection form.
-- Driver broadcaster that emits fake positions for 1, 2, or 4 buses every 3 or 5 seconds.
-- Rider/admin subscriber that listens on `route:{route_id}:positions`.
-- Per-bus latest position table.
-- Latency measurement from `sent_at` to receive time.
-- Stop-log listener using `postgres_changes` on `public.stop_logs`.
-- Optional test insert button using RPC `spike_insert_stop_log`.
-- Exportable JSON event logs.
+| Capability | Purpose |
+|---|---|
+| Driver broadcaster | Emits fake positions for 1, 2, or 4 buses every 3 or 5 seconds. |
+| Rider/admin subscriber | Listens on `route:{route_id}:positions`. |
+| Latest position table | Shows current position per bus. |
+| Latency measurement | Measures receive latency from `sent_at`. |
+| Stop-log listener | Uses `postgres_changes` on `public.stop_logs`. |
+| Insert helper | Optional RPC `spike_insert_stop_log`. |
+| Event export | Saves JSON evidence logs. |
 
 ## Test setup
 
-- Device/browser: local desktop browser test
-- Supabase project: test project connected with browser-safe publishable/anon key
-- Region: fake demo coordinates from shared sample route
-- Network: local static server with Wi-Fi toggled offline/online
-- Test data: fake moving bus payloads generated in browser
+| Dimension | Value |
+|---|---|
+| Device/browser | Local desktop browser test |
+| Supabase project | Test project connected with browser-safe publishable/anon key |
+| Region | Fake demo coordinates from shared sample route |
+| Network | Local static server with Wi-Fi toggled offline/online |
+| Test data | Fake moving bus payloads generated in browser |
 
-## Pressure tests
+## Pressure-test results
 
-Real validation still needs a non-production Supabase project.
-
-Planned tests:
-
-- Happy path:
-  - Connect with anon key.
-  - Subscribe rider/admin tab.
-  - Start driver broadcast with 1 bus.
-  - Repeat with 2 and 4 buses.
-  - Confirm latency stays acceptable for rider UX.
-- Failure path:
-  - Kill/restart network.
-  - Close/reopen subscriber tab.
-  - Confirm channel status and recovery behavior in event log.
-- Durable stop-log path:
-  - Enable Realtime publication for `public.stop_logs`.
-  - Insert test stop log via RPC or SQL editor.
-  - Confirm Postgres Changes event appears separately from GPS broadcast.
-- Architecture check:
-  - Confirm GPS broadcasts do not create database rows.
+| Test area | Expected | Observed | Status |
+|---|---|---|---|
+| Prototype load | Page opens locally | HTTP 200, smoke test passed | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Broadcast GPS | Subscriber receives live positions | Working on desktop | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Wi-Fi offline/online reconnect | Reconnect without manual user action | Reconnection appeared almost immediate | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Manual resubscribe during Wi-Fi toggle | Should not be needed | Not needed | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Closing subscription tab | New tab must subscribe again | Manual resubscription required | <span style="color:#16a34a"><strong>Expected</strong></span> |
+| Offline event behavior | GPS Broadcast may drop messages | Sent count exceeded received count during offline periods | <span style="color:#f59e0b"><strong>Expected constraint</strong></span> |
+| Durable stop-log listener | Stop-log insert fires separate event | `stop_logs` Postgres Changes listener fired | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Tablet/mobile network | Same behavior on target runtime | Not tested yet | <span style="color:#f59e0b"><strong>Pending</strong></span> |
 
 ## Findings
 
-Prototype implementation and static smoke test passed:
+| Finding | Interpretation |
+|---|---|
+| Event logs were exported from the 002 prototype. | Evidence capture path works. |
+| Reconnection after Wi-Fi offline/online appeared almost immediate. | Desktop reconnect behavior is promising. |
+| Manual resubscription was only needed after closing the subscription tab. | Expected; a new tab has no previous channel subscription. |
+| Manual resubscription was not needed for Wi-Fi offline/online toggling. | Good signal for operational resilience. |
+| Broadcaster event log kept streaming local send events while offline. | Local code continues attempting sends; network delivery is not guaranteed. |
+| Sent count became higher than received count during Wi-Fi toggling. | Expected for ephemeral Broadcast; GPS pings are not durable queue items. |
+| Separate `stop_logs` Postgres Changes listener fired successfully. | Confirms GPS and durable stop events can use separate realtime paths. |
+
+Smoke test evidence:
 
 ```text
 http://localhost:4173/002-supabase-realtime-split/
@@ -68,55 +99,47 @@ HTTP 200
 prototype 002 smoke test passed
 ```
 
-Desktop Supabase-connected observation from Allan:
+## Architecture interpretation
 
-- Event logs were exported from the 002 prototype.
-- Reconnection after Wi-Fi offline/online toggle appeared almost immediate.
-- Manual resubscription was only needed when the subscription tab itself was closed and a new tab was opened.
-- Manual resubscription was not needed for normal offline/online toggling.
-- While offline, the broadcaster-side event log kept streaming local broadcast/send events.
-- During Wi-Fi toggling, sent message count became higher than received message count.
-- The separate durable `stop_logs` Postgres Changes listener fired successfully when a stop log was inserted.
-
-Interpretation:
-
-- Reconnect behavior looks promising for desktop browser testing.
-- The sent-vs-received mismatch during offline periods is expected for ephemeral Broadcast: messages emitted while the subscriber/network is unavailable should not be treated as durable queued events.
-- Production UI should show stale/last-seen state and not imply every GPS ping is guaranteed delivery.
-- This supports the architecture principle: GPS is live ephemeral state; stop logs remain the durable source of business truth.
-- The core realtime split is working on desktop: Broadcast handles live positions, and Postgres Changes separately reports durable stop events.
-
-No final production verdict yet. We still need the same test on target mobile/tablet network conditions.
+| Principle | Spike evidence |
+|---|---|
+| GPS is ephemeral UI state | Broadcast can drop messages during offline periods; this is acceptable if UI shows stale/last-seen state. |
+| Stop logs are durable business records | Postgres Changes fired separately when a stop log was inserted. |
+| Database should not receive every GPS ping | Broadcast path is separate from Postgres writes. |
+| Rider/admin UI needs stale state | Sent > received can happen by design during network disruption. |
 
 ## Decision
 
-PARTIAL — DESKTOP REALTIME SPLIT VALIDATED; TABLET/MOBILE NETWORK BEHAVIOR STILL PENDING
+<span style="color:#f59e0b"><strong>PARTIAL — DESKTOP REALTIME SPLIT VALIDATED; TABLET/MOBILE NETWORK BEHAVIOR STILL PENDING</strong></span>
 
 ## Recommendation
 
-Use this as the Phase 0 realtime validation harness. Run it against a non-production Supabase project with anon key only.
+Use this architecture for the MVP unless tablet/mobile testing invalidates it:
 
-If validated, production should use:
-
-- Supabase Broadcast channel `route:{route_id}:positions` for ephemeral GPS.
-- Postgres `stop_logs` + Realtime Postgres Changes for durable stop events.
-- Optional low-frequency `bus_position_snapshots` table for initial map load / last-known-position.
+| Production choice | Recommendation |
+|---|---|
+| Live GPS transport | Supabase Broadcast channel `route:{route_id}:positions` |
+| Durable stop events | Postgres `stop_logs` + Realtime Postgres Changes |
+| Initial map state | Consider low-frequency `bus_position_snapshots` for last-known-position |
+| Offline GPS behavior | Do not replay stale GPS as current position |
+| Rider/admin UI | Show last seen time, stale marker state, and disconnected state |
 
 ## Implementation impact
 
-Likely production modules affected:
-
-- `src/realtime/positionBroadcast.ts`
-- `src/realtime/stopLogSubscription.ts`
-- `src/features/driver/locationPublisher.ts`
-- `src/features/rider/liveBusStore.ts`
-- Supabase publication config for `stop_logs`
-- Possible `bus_position_snapshots` table/RPC if initial map blank state is unacceptable
+| Area | Likely module/schema impact |
+|---|---|
+| Position broadcast | `src/realtime/positionBroadcast.ts` |
+| Stop-log subscription | `src/realtime/stopLogSubscription.ts` |
+| Driver GPS publisher | `src/features/driver/locationPublisher.ts` |
+| Rider live bus store | `src/features/rider/liveBusStore.ts` |
+| Supabase config | Realtime publication config for `stop_logs` |
+| Optional snapshot | `bus_position_snapshots` table/RPC if initial map blank state is unacceptable |
 
 ## Risks remaining
 
-- Real Supabase desktop Broadcast reconnect looks promising, but mobile/tablet network behavior is not yet tested.
-- Real Supabase latency range/average has not yet been summarized from exported logs.
-- RLS/private-channel design not yet tested.
-- Browser/tab behavior on mobile network not yet tested.
-- Production needs stale-position UI because Broadcast can drop messages while offline; sent count can exceed received count by design.
+| Risk | Status |
+|---|---|
+| Tablet/mobile network behavior not tested | <span style="color:#dc2626"><strong>Open</strong></span> |
+| Latency range/average not summarized from exported logs | <span style="color:#f59e0b"><strong>Open</strong></span> |
+| RLS/private-channel design not tested here | <span style="color:#f59e0b"><strong>Separate spike</strong></span> |
+| UI stale-position design required | <span style="color:#f59e0b"><strong>Must implement</strong></span> |
