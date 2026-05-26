@@ -145,3 +145,4 @@ vite.config.ts.timestamp-*
 # Spike prototype exported evidence logs
 prototypes/spikes/**/supabase-realtime-split-*.json
 prototypes/spikes/**/wake-kiosk-spike-*.json
+prototypes/spikes/**/indexeddb-buffer-flush-*.json

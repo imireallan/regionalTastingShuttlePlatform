@@ -34,6 +34,17 @@ Can the actual or closest Android tablet keep screen, browser, GPS, and network 
 
 This is the highest-risk MVP assumption. If browser geolocation + wake lock + Fully Kiosk cannot stay reliable, the driver tracking architecture needs a fallback before production build.
 
+## What this spike tests
+
+| Test focus | What we need to learn |
+|---|---|
+| Wake Lock behavior | Whether the browser can keep the screen awake during driver operations. |
+| Geolocation continuity | Whether location sampling continues while the page is active. |
+| Timer reliability | Whether 3-5 second tracking/broadcast loops avoid serious throttling. |
+| Network/visibility events | Whether the driver page can detect and communicate connectivity or tab visibility changes. |
+| Fully Kiosk suitability | Whether Android + Fully Kiosk can run the driver page for a realistic shift. |
+| Operational fallback need | Whether we need a native wrapper, Android foreground service, or external GPS tracker instead of web-only tracking. |
+
 ## Prototype
 
 | Field | Details |

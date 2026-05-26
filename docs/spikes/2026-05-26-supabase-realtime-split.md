@@ -35,6 +35,17 @@ Can Supabase Realtime Broadcast handle ephemeral GPS positions while Postgres Ch
 
 The MVP architecture depends on splitting high-frequency, disposable GPS state from durable business records. If this fails, we either write too much GPS data to Postgres, add a custom realtime backend, or change the live map freshness expectation.
 
+## What this spike tests
+
+| Test focus | What we need to learn |
+|---|---|
+| Broadcast GPS path | Whether live bus positions can move through Supabase Broadcast without database writes. |
+| Durable stop-log path | Whether `stop_logs` changes appear separately through Postgres Changes. |
+| Reconnect behavior | Whether Wi-Fi offline/online interruptions recover without manual resubscription. |
+| Ephemeral message loss | Whether sent vs received mismatches are expected and manageable during offline periods. |
+| Channel scoping | Whether `route:{route_id}:positions` is a workable channel boundary for rider/admin live maps. |
+| Initial state need | Whether production needs a last-known-position snapshot table for first map load. |
+
 ## Prototype
 
 | Field | Details |

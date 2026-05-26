@@ -37,6 +37,17 @@ What is the simplest secure driver name/PIN pattern that still allows enforceabl
 
 The driver app needs a low-friction tablet login, but stop logs must not rely on trusted frontend fields. If a driver can change `bus_id`, `route_id`, or `driver_id` in the browser and write another bus's records, the MVP security model is invalid.
 
+## What this spike tests
+
+| Test focus | What we need to learn |
+|---|---|
+| Driver login pattern | Whether name + PIN can map cleanly to Supabase Auth. |
+| RLS identity binding | Whether `auth.uid()` can enforce driver ownership through `drivers.auth_user_id`. |
+| Assigned-bus enforcement | Whether a driver is blocked from writing another bus's stop logs. |
+| Driver spoofing protection | Whether changing `created_by_driver_id` in the client is blocked by RLS. |
+| Deactivation behavior | Whether an inactive driver immediately loses write access. |
+| Admin operations | Whether PIN reset/rotation and driver deactivation are operationally simple enough for V1. |
+
 ## Prototype
 
 | Field | Details |

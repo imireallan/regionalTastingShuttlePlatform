@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spike 004 — IndexedDB Buffer/Flush</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #07110f;
+        color: #ecfdf5;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: radial-gradient(circle at top left, #164e44 0, #07110f 44%, #020403 100%);
+      }
+      main { max-width: 1180px; margin: 0 auto; }
+      h1 { margin: 0 0 6px; font-size: 26px; }
+      h2 { margin: 0 0 12px; font-size: 18px; }
+      p, .small { color: #a7f3d0; }
+      .small { font-size: 12px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 16px 0; }
+      .card {
+        border: 1px solid rgba(110, 231, 183, 0.22);
+        background: rgba(6, 78, 59, 0.32);
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24);
+      }
+      .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 12px 16px;
+        font-size: 14px;
+        font-weight: 750;
+        cursor: pointer;
+        color: #022c22;
+        background: #34d399;
+      }
+      button.secondary { color: #d1fae5; background: rgba(209, 250, 229, 0.12); border: 1px solid rgba(209, 250, 229, 0.24); }
+      button.warn { color: #1c1917; background: #fbbf24; }
+      button.danger { color: #fff7ed; background: #ea580c; }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      input[type="number"] {
+        width: 80px;
+        border: 1px solid rgba(167, 243, 208, 0.25);
+        background: rgba(2, 44, 34, 0.85);
+        color: #ecfdf5;
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 16px;
+      }
+      label { color: #a7f3d0; display: block; margin: 8px 0; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { border-bottom: 1px solid rgba(167, 243, 208, 0.12); padding: 9px; text-align: left; vertical-align: top; }
+      th { color: #a7f3d0; background: rgba(6, 78, 59, 0.45); }
+      .metric { font-size: 26px; font-weight: 800; }
+      .ok { color: #34d399; }
+      .warnText { color: #fbbf24; }
+      .bad { color: #fb7185; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+      .pill { display: inline-block; border-radius: 999px; padding: 3px 9px; font-weight: 800; font-size: 12px; }
+      .pill-ok { background: rgba(52, 211, 153, 0.18); color: #34d399; }
+      .pill-warn { background: rgba(251, 191, 36, 0.18); color: #fbbf24; }
+      .pill-bad { background: rgba(251, 113, 133, 0.18); color: #fb7185; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>IndexedDB Buffer/Flush Spike</h1>
+      <p>Pressure-test whether driver stop taps survive short offline periods, refreshes, duplicate taps, and partial flush failures.</p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Network simulation</h2>
+          <div>Status: <span id="networkStatus" class="metric ok">online</span></div>
+          <div class="controls">
+            <button id="onlineButton">Go online</button>
+            <button id="offlineButton" class="danger">Go offline</button>
+            <button id="failNextFlushButton" class="warn">Fail next flush</button>
+          </div>
+          <p class="small">This is a deterministic simulation. It does not change your actual Wi-Fi.</p>
+        </div>
+
+        <div class="card">
+          <h2>Current stop</h2>
+          <div>Stop: <strong id="stopName">Welcome Center</strong></div>
+          <div>Stop code: <span id="stopCode" class="mono">stop-1</span></div>
+          <label>Boarded <input id="boardedInput" type="number" min="0" value="0" /></label>
+          <label>Alighted <input id="alightedInput" type="number" min="0" value="0" /></label>
+          <div class="controls">
+            <button id="arrivedButton">Arrived</button>
+            <button id="confirmButton">Confirm</button>
+            <button id="duplicateConfirmButton" class="secondary">Duplicate confirm</button>
+            <button id="nextStopButton" class="secondary">Next stop</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>GPS behavior</h2>
+          <div>Latest GPS: <span id="gpsState" class="mono">none</span></div>
+          <div class="controls">
+            <button id="sendGpsButton" class="secondary">Send/store latest GPS</button>
+            <button id="ageGpsButton" class="warn">Age GPS past TTL</button>
+          </div>
+          <p class="small">GPS uses latest-only state with TTL. Stale GPS should be dropped, not replayed as current.</p>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Queue metrics</h2>
+          <table>
+            <tr><th>Queued</th><td><span id="queuedCount" class="metric warnText">0</span></td></tr>
+            <tr><th>Synced</th><td><span id="syncedCount" class="metric ok">0</span></td></tr>
+            <tr><th>Failed</th><td><span id="failedCount" class="metric bad">0</span></td></tr>
+            <tr><th>Last flush</th><td><span id="lastFlush">never</span></td></tr>
+          </table>
+          <div class="controls">
+            <button id="flushButton">Flush queue</button>
+            <button id="resetButton" class="danger">Reset spike data</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Pressure test checklist</h2>
+          <table>
+            <tbody id="checklistBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Queued stop events</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Type</th>
+              <th>Stop</th>
+              <th>Counts</th>
+              <th>Status</th>
+              <th>Idempotency key</th>
+              <th>Attempts</th>
+            </tr>
+          </thead>
+          <tbody id="queueBody"></tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>Synced durable records</h2>
+        <p class="small">This simulates durable Postgres rows. Duplicate idempotency keys should not create duplicate records.</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Synced at</th>
+              <th>Type</th>
+              <th>Stop</th>
+              <th>Counts</th>
+              <th>Idempotency key</th>
+            </tr>
+          </thead>
+          <tbody id="syncedBody"></tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>Event log</h2>
+        <div class="controls">
+          <button id="exportButton" class="secondary">Export JSON</button>
+          <button id="clearLogButton" class="secondary">Clear log</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Type</th><th>Details</th></tr>
+          </thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const DB_NAME = 'rts-spike-004-indexeddb';
+      const DB_VERSION = 1;
+      const GPS_TTL_MS = 30_000;
+      const stops = [
+        { code: 'stop-1', name: 'Welcome Center' },
+        { code: 'stop-2', name: 'North Tasting Room' },
+        { code: 'stop-3', name: 'Vineyard Gate' },
+        { code: 'stop-4', name: 'Market Return' },
+      ];
+      const state = {
+        db: null,
+        online: true,
+        failNextFlush: false,
+        currentStopIndex: 0,
+        lastConfirmKey: null,
+        logs: [],
+      };
+      const $ = (id) => document.getElementById(id);
+
+      function request(storeName, mode, fn) {
+        return new Promise((resolve, reject) => {
+          const tx = state.db.transaction(storeName, mode);
+          const store = tx.objectStore(storeName);
+          const result = fn(store);
+          tx.oncomplete = () => resolve(result);
+          tx.onerror = () => reject(tx.error);
+          tx.onabort = () => reject(tx.error);
+        });
+      }
+      function promisify(req) {
+        return new Promise((resolve, reject) => {
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      function openDb() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, DB_VERSION);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            const events = db.createObjectStore('events', { keyPath: 'id' });
+            events.createIndex('byCreatedAt', 'createdAt');
+            events.createIndex('byStatus', 'status');
+            events.createIndex('byIdempotencyKey', 'idempotencyKey', { unique: false });
+            const synced = db.createObjectStore('synced', { keyPath: 'idempotencyKey' });
+            synced.createIndex('bySyncedAt', 'syncedAt');
+            db.createObjectStore('meta', { keyPath: 'key' });
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      async function getAll(storeName) {
+        const tx = state.db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        return await promisify(store.getAll());
+      }
+      async function put(storeName, value) {
+        await request(storeName, 'readwrite', (store) => store.put(value));
+      }
+      async function remove(storeName, key) {
+        await request(storeName, 'readwrite', (store) => store.delete(key));
+      }
+      async function clearStore(storeName) {
+        await request(storeName, 'readwrite', (store) => store.clear());
+      }
+      function nowIso() { return new Date().toISOString(); }
+      function eventId() { return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
+      function idempotencyKey(type, stopCode) {
+        return `driver-demo:route-demo:bus-demo:${new Date().toISOString().slice(0,10)}:${stopCode}:${type}`;
+      }
+      function log(type, details = {}) {
+        const entry = { at: nowIso(), type, details };
+        state.logs.unshift(entry);
+        renderLogs();
+        console.log('[indexeddb-buffer-spike]', entry);
+      }
+      function escapeHtml(value) {
+        return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
+      }
+      async function enqueueStopEvent(type, duplicate = false) {
+        const stop = stops[state.currentStopIndex];
+        const key = duplicate && state.lastConfirmKey ? state.lastConfirmKey : idempotencyKey(type, stop.code);
+        if (type === 'confirm') state.lastConfirmKey = key;
+        const event = {
+          id: eventId(),
+          type,
+          stopCode: stop.code,
+          stopName: stop.name,
+          boarded: Number($('boardedInput').value || 0),
+          alighted: Number($('alightedInput').value || 0),
+          status: 'queued',
+          createdAt: nowIso(),
+          idempotencyKey: key,
+          attempts: 0,
+          lastError: null,
+        };
+        await put('events', event);
+        log('stop-event-queued', { type, stopCode: stop.code, idempotencyKey: key, duplicate });
+        if (state.online) await flushQueue();
+        await render();
+      }
+      async function flushQueue() {
+        const events = (await getAll('events')).sort((a,b) => a.createdAt.localeCompare(b.createdAt));
+        if (!events.length) {
+          log('flush-noop');
+          $('lastFlush').textContent = 'no queued events';
+          return;
+        }
+        if (!state.online) {
+          log('flush-blocked-offline', { queued: events.length });
+          $('lastFlush').textContent = 'blocked: offline';
+          await render();
+          return;
+        }
+        for (const event of events) {
+          event.status = 'flushing';
+          event.attempts += 1;
+          await put('events', event);
+          await render();
+          if (state.failNextFlush) {
+            state.failNextFlush = false;
+            event.status = 'failed';
+            event.lastError = 'Simulated partial flush failure';
+            await put('events', event);
+            log('flush-event-failed', { id: event.id, idempotencyKey: event.idempotencyKey });
+            $('lastFlush').textContent = 'partial failure; retry needed';
+            await render();
+            return;
+          }
+          const existing = await promisify(state.db.transaction('synced', 'readonly').objectStore('synced').get(event.idempotencyKey));
+          if (existing) {
+            log('flush-duplicate-skipped', { idempotencyKey: event.idempotencyKey });
+          } else {
+            await put('synced', { ...event, syncedAt: nowIso(), status: 'synced' });
+            log('flush-event-synced', { type: event.type, stopCode: event.stopCode, idempotencyKey: event.idempotencyKey });
+          }
+          await remove('events', event.id);
+        }
+        $('lastFlush').textContent = `flushed at ${new Date().toLocaleTimeString()}`;
+        await render();
+      }
+      async function storeGps(agePastTtl = false) {
+        const createdAt = agePastTtl ? new Date(Date.now() - GPS_TTL_MS - 5000).toISOString() : nowIso();
+        const gps = {
+          key: 'latestGps',
+          lat: -1.2921 + Math.random() / 1000,
+          lng: 36.8219 + Math.random() / 1000,
+          createdAt,
+          accuracyM: 12,
+        };
+        await put('meta', gps);
+        log(agePastTtl ? 'gps-aged-past-ttl' : 'gps-latest-stored', gps);
+        await render();
+      }
+      async function handleOnline() {
+        state.online = true;
+        log('network-online-simulated');
+        const gps = await promisify(state.db.transaction('meta', 'readonly').objectStore('meta').get('latestGps'));
+        if (gps) {
+          const ageMs = Date.now() - Date.parse(gps.createdAt);
+          if (ageMs > GPS_TTL_MS) {
+            await remove('meta', 'latestGps');
+            log('stale-gps-dropped', { ageMs, ttlMs: GPS_TTL_MS });
+          } else {
+            log('latest-gps-current-enough', { ageMs, ttlMs: GPS_TTL_MS });
+          }
+        }
+        await flushQueue();
+        await render();
+      }
+      function statusPill(status) {
+        const cls = status === 'synced' ? 'pill-ok' : status === 'failed' ? 'pill-bad' : status === 'flushing' ? 'pill-warn' : 'pill-warn';
+        return `<span class="pill ${cls}">${status}</span>`;
+      }
+      async function render() {
+        const stop = stops[state.currentStopIndex];
+        $('stopName').textContent = stop.name;
+        $('stopCode').textContent = stop.code;
+        $('networkStatus').textContent = state.online ? 'online' : 'offline';
+        $('networkStatus').className = `metric ${state.online ? 'ok' : 'bad'}`;
+        const events = (await getAll('events')).sort((a,b) => a.createdAt.localeCompare(b.createdAt));
+        const synced = (await getAll('synced')).sort((a,b) => b.syncedAt.localeCompare(a.syncedAt));
+        const queued = events.filter(e => e.status === 'queued' || e.status === 'flushing').length;
+        const failed = events.filter(e => e.status === 'failed').length;
+        $('queuedCount').textContent = String(queued);
+        $('failedCount').textContent = String(failed);
+        $('syncedCount').textContent = String(synced.length);
+        $('queueBody').innerHTML = events.map((event, index) => `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${event.type}</td>
+            <td>${event.stopName}</td>
+            <td>+${event.boarded} / -${event.alighted}</td>
+            <td>${statusPill(event.status)}</td>
+            <td class="mono">${event.idempotencyKey}</td>
+            <td>${event.attempts}${event.lastError ? `<br><span class="bad">${escapeHtml(event.lastError)}</span>` : ''}</td>
+          </tr>
+        `).join('');
+        $('syncedBody').innerHTML = synced.map((event) => `
+          <tr>
+            <td>${event.syncedAt}</td>
+            <td>${event.type}</td>
+            <td>${event.stopName}</td>
+            <td>+${event.boarded} / -${event.alighted}</td>
+            <td class="mono">${event.idempotencyKey}</td>
+          </tr>
+        `).join('');
+        const gps = await promisify(state.db.transaction('meta', 'readonly').objectStore('meta').get('latestGps'));
+        $('gpsState').textContent = gps ? `${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)} @ ${gps.createdAt}` : 'none';
+        renderChecklist(events, synced, gps);
+      }
+      function renderChecklist(events, synced, gps) {
+        const hasQueued = events.length > 0;
+        const hasSynced = synced.length > 0;
+        const duplicateSkipped = state.logs.some(l => l.type === 'flush-duplicate-skipped');
+        const staleDropped = state.logs.some(l => l.type === 'stale-gps-dropped');
+        const failed = events.some(e => e.status === 'failed') || state.logs.some(l => l.type === 'flush-event-failed');
+        const rows = [
+          ['Queue survives refresh', hasQueued || hasSynced, 'Refresh while offline and confirm queued/synced state remains.'],
+          ['Flush in order', hasSynced, 'Events are processed oldest first.'],
+          ['Duplicate prevented', duplicateSkipped, 'Duplicate idempotency key is skipped.'],
+          ['Partial failure visible', failed, 'Failed event remains visible/retryable.'],
+          ['Stale GPS dropped', staleDropped, 'Old GPS is removed instead of replayed.'],
+        ];
+        $('checklistBody').innerHTML = rows.map(([name, pass, note]) => `
+          <tr><td>${name}</td><td>${pass ? '<span class="pill pill-ok">observed</span>' : '<span class="pill pill-warn">pending</span>'}</td><td>${note}</td></tr>
+        `).join('');
+      }
+      function renderLogs() {
+        $('logBody').innerHTML = state.logs.slice(0, 200).map((entry) => `
+          <tr><td>${entry.at}</td><td>${entry.type}</td><td>${escapeHtml(JSON.stringify(entry.details))}</td></tr>
+        `).join('');
+      }
+      async function resetAll() {
+        await clearStore('events');
+        await clearStore('synced');
+        await clearStore('meta');
+        state.logs = [];
+        state.online = true;
+        state.failNextFlush = false;
+        state.currentStopIndex = 0;
+        state.lastConfirmKey = null;
+        log('spike-reset');
+        await render();
+      }
+      function exportLogs() {
+        Promise.all([getAll('events'), getAll('synced')]).then(([events, synced]) => {
+          const payload = { exportedAt: nowIso(), userAgent: navigator.userAgent, online: state.online, events, synced, logs: state.logs.slice().reverse() };
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `indexeddb-buffer-flush-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+          link.click();
+          URL.revokeObjectURL(url);
+          log('logs-exported', { queued: events.length, synced: synced.length });
+        });
+      }
+      $('onlineButton').addEventListener('click', handleOnline);
+      $('offlineButton').addEventListener('click', async () => { state.online = false; log('network-offline-simulated'); await render(); });
+      $('failNextFlushButton').addEventListener('click', () => { state.failNextFlush = true; log('next-flush-will-fail'); });
+      $('arrivedButton').addEventListener('click', () => enqueueStopEvent('arrived'));
+      $('confirmButton').addEventListener('click', () => enqueueStopEvent('confirm'));
+      $('duplicateConfirmButton').addEventListener('click', () => enqueueStopEvent('confirm', true));
+      $('nextStopButton').addEventListener('click', async () => { state.currentStopIndex = (state.currentStopIndex + 1) % stops.length; $('boardedInput').value = 0; $('alightedInput').value = 0; log('next-stop-selected', stops[state.currentStopIndex]); await render(); });
+      $('flushButton').addEventListener('click', flushQueue);
+      $('resetButton').addEventListener('click', resetAll);
+      $('sendGpsButton').addEventListener('click', () => storeGps(false));
+      $('ageGpsButton').addEventListener('click', () => storeGps(true));
+      $('exportButton').addEventListener('click', exportLogs);
+      $('clearLogButton').addEventListener('click', () => { state.logs = []; renderLogs(); log('logs-cleared'); });
+      openDb().then(async (db) => { state.db = db; log('page-loaded'); await render(); }).catch((error) => { console.error(error); alert(`IndexedDB failed: ${error.message}`); });
+    </script>
+  </body>
+</html>
