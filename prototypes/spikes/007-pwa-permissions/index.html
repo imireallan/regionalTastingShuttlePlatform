@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spike 007 — PWA Permissions UX</title>
+    <style>
+      :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background:#07110f; color:#ecfdf5; }
+      body { margin:0; padding:14px; background: radial-gradient(circle at top left,#153e35 0,#07110f 42%,#020403 100%); }
+      main { max-width: 980px; margin: 0 auto; }
+      h1 { margin: 0 0 6px; font-size: 24px; }
+      .small { color:#a7f3d0; font-size:12px; }
+      .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin:14px 0; }
+      .card { border:1px solid rgba(110,231,183,.22); background: rgba(6,78,59,.32); border-radius:14px; padding:12px; }
+      button, select { border-radius:10px; border:1px solid rgba(167,243,208,.25); background: rgba(2,44,34,.85); color:#ecfdf5; padding:10px 12px; }
+      button { cursor:pointer; font-weight:700; }
+      .primary { border:none; border-radius:999px; background:#34d399; color:#022c22; }
+      .warn { border:none; border-radius:999px; background:#fbbf24; color:#1c1917; }
+      .danger { border:none; border-radius:999px; background:#ea580c; color:#fff7ed; }
+      table { width:100%; border-collapse:collapse; font-size:13px; }
+      th,td { border-bottom:1px solid rgba(167,243,208,.12); padding:8px; text-align:left; vertical-align:top; }
+      th { color:#a7f3d0; background: rgba(6,78,59,.45); }
+      .pill { display:inline-block; border-radius:999px; padding:3px 9px; font-size:12px; font-weight:800; }
+      .ok { background:rgba(52,211,153,.18); color:#34d399; }
+      .warnText { background:rgba(251,191,36,.18); color:#fbbf24; }
+      .bad { background:rgba(251,113,133,.18); color:#fb7185; }
+      .controls { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+      .mono { font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>PWA Permissions UX Spike</h1>
+      <p class="small">Pressure-test rider access and driver permission recovery UX for geolocation, notifications, install stance, and denied-state handling.</p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Rider access flow</h2>
+          <label class="small">Entry mode</label>
+          <select id="riderMode">
+            <option value="qr">QR scan</option>
+            <option value="code">Daily access code</option>
+          </select>
+          <div class="controls">
+            <button id="continueRider" class="primary">Continue</button>
+            <button id="badCode" class="danger">Simulate invalid code</button>
+          </div>
+          <p id="riderState" class="mono">state: idle</p>
+        </div>
+
+        <div class="card">
+          <h2>Driver permission preflight</h2>
+          <div class="controls">
+            <button id="checkPerms" class="primary">Run permission check</button>
+            <button id="simulateDenied" class="danger">Simulate geolocation denied</button>
+            <button id="recoverPerms" class="warn">Show recovery steps</button>
+          </div>
+          <table>
+            <tr><th>Geolocation</th><td id="geoState">unknown</td></tr>
+            <tr><th>Notifications</th><td id="notifState">unknown</td></tr>
+            <tr><th>Install prompt</th><td id="installState">deferred/prompt-driven</td></tr>
+            <tr><th>Outcome</th><td id="driverOutcome">pending</td></tr>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Permission recovery copy (driver)</h2>
+        <ol id="recoveryList">
+          <li>Open browser site settings.</li>
+          <li>Set Location to Allow.</li>
+          <li>Reload driver page and re-run preflight.</li>
+          <li>If still blocked, restart Fully Kiosk profile and retry.</li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>Pressure test checklist</h2>
+        <table><tbody id="checklist"></tbody></table>
+      </section>
+
+      <section class="card">
+        <h2>Event log</h2>
+        <div class="controls">
+          <button id="export" class="warn">Export JSON</button>
+          <button id="clear" class="danger">Clear log</button>
+        </div>
+        <table>
+          <thead><tr><th>Time</th><th>Type</th><th>Details</th></tr></thead>
+          <tbody id="logs"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const state = {
+        logs: [],
+        riderSuccess: false,
+        riderInvalid: false,
+        checkedPerms: false,
+        deniedSimulated: false,
+        recoveryShown: true,
+        geo: 'unknown',
+        notif: 'unknown',
+      };
+      const $ = (id) => document.getElementById(id);
+      const nowIso = () => new Date().toISOString();
+      const esc = (x) => String(x).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+
+      function log(type, details = {}) {
+        state.logs.unshift({ at: nowIso(), type, details });
+        renderLogs();
+        renderChecklist();
+        console.log('[pwa-permissions-spike]', { type, details });
+      }
+
+      async function runPermissionCheck() {
+        state.checkedPerms = true;
+        try {
+          if (navigator.permissions) {
+            const geoP = await navigator.permissions.query({ name: 'geolocation' });
+            state.geo = geoP.state;
+            geoP.onchange = () => { state.geo = geoP.state; $('geoState').textContent = geoP.state; log('geo-permission-changed', { state: geoP.state }); };
+
+            try {
+              const notifP = await navigator.permissions.query({ name: 'notifications' });
+              state.notif = notifP.state;
+            } catch {
+              state.notif = Notification?.permission || 'unsupported';
+            }
+          } else {
+            state.geo = 'unsupported';
+            state.notif = Notification?.permission || 'unsupported';
+          }
+          $('geoState').textContent = state.geo;
+          $('notifState').textContent = state.notif;
+          $('driverOutcome').textContent = (state.geo === 'granted' || state.geo === 'prompt') ? 'preflight pass' : 'preflight blocked';
+          log('permission-check', { geo: state.geo, notif: state.notif });
+        } catch (e) {
+          $('driverOutcome').textContent = 'preflight error';
+          log('permission-check-error', { message: e.message });
+        }
+      }
+
+      function renderLogs() {
+        $('logs').innerHTML = state.logs.slice(0, 120).map(l => `<tr><td>${l.at}</td><td>${l.type}</td><td>${esc(JSON.stringify(l.details))}</td></tr>`).join('');
+      }
+
+      function renderChecklist() {
+        const rows = [
+          ['Rider QR/code happy path', state.riderSuccess, 'Continue with QR or code reaches active rider state'],
+          ['Rider invalid-code state', state.riderInvalid, 'Invalid code shows clear blocked feedback'],
+          ['Driver preflight check', state.checkedPerms, 'Permission check reports geolocation + notifications states'],
+          ['Denied geolocation state', state.deniedSimulated || state.geo === 'denied', 'Blocked driver state is explicit'],
+          ['Recovery guidance visible', state.recoveryShown, 'Actionable steps are shown for denied permissions'],
+          ['Exportable evidence logs', state.logs.length > 0, 'JSON export available for runbook evidence'],
+        ];
+        $('checklist').innerHTML = rows.map(([name, ok, note]) => `<tr><td>${name}</td><td><span class="pill ${ok ? 'ok' : 'warnText'}">${ok ? 'observed' : 'pending'}</span></td><td>${note}</td></tr>`).join('');
+      }
+
+      function exportLogs() {
+        const payload = {
+          exportedAt: nowIso(),
+          userAgent: navigator.userAgent,
+          geo: state.geo,
+          notif: state.notif,
+          riderSuccess: state.riderSuccess,
+          riderInvalid: state.riderInvalid,
+          logs: state.logs.slice().reverse(),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pwa-permissions-spike-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        log('logs-exported', { count: state.logs.length });
+      }
+
+      $('continueRider').addEventListener('click', () => {
+        const mode = $('riderMode').value;
+        state.riderSuccess = true;
+        $('riderState').textContent = `state: active (${mode})`;
+        log('rider-continued', { mode });
+      });
+      $('badCode').addEventListener('click', () => {
+        state.riderInvalid = true;
+        $('riderState').textContent = 'state: blocked (invalid code)';
+        log('rider-invalid-code', { mode: 'code' });
+      });
+      $('checkPerms').addEventListener('click', runPermissionCheck);
+      $('simulateDenied').addEventListener('click', () => {
+        state.deniedSimulated = true;
+        state.geo = 'denied';
+        $('geoState').textContent = 'denied';
+        $('driverOutcome').textContent = 'preflight blocked';
+        log('geo-denied-simulated');
+      });
+      $('recoverPerms').addEventListener('click', () => {
+        state.recoveryShown = true;
+        log('recovery-steps-reviewed');
+      });
+      $('export').addEventListener('click', exportLogs);
+      $('clear').addEventListener('click', () => { state.logs = []; renderLogs(); log('logs-cleared'); });
+
+      log('page-loaded');
+      renderChecklist();
+    </script>
+  </body>
+</html>

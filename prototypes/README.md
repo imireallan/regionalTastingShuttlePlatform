@@ -19,6 +19,7 @@ Then open:
 - IndexedDB Buffer/Flush: http://localhost:4173/004-indexeddb-buffer-flush/
 - Map Tiles: http://localhost:4173/005-map-tiles/
 - Schedule ETA: run `node prototypes/spikes/006-schedule-eta/fixtures-and-tests.mjs`
+- PWA Permissions UX: http://localhost:4173/007-pwa-permissions/
 
 Notes:
 
