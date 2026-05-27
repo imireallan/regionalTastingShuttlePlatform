@@ -15,6 +15,9 @@ python3 -m http.server 4173 --directory prototypes/spikes
 Then open:
 
 - Wake Lock + Kiosk: http://localhost:4173/001-wakelock-kiosk/
+- Supabase Realtime Split: http://localhost:4173/002-supabase-realtime-split/
+- IndexedDB Buffer/Flush: http://localhost:4173/004-indexeddb-buffer-flush/
+- Map Tiles: http://localhost:4173/005-map-tiles/
 
 Notes:
 

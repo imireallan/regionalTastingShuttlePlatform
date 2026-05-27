@@ -81,13 +81,15 @@ Prototype capabilities:
 
 | Test area | Expected | Observed | Status |
 |---|---|---|---|
-| Prototype load | Page opens locally | HTTP 200, smoke test passed | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Broadcast GPS | Subscriber receives live positions | Working on desktop | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Wi-Fi offline/online reconnect | Reconnect without manual user action | Reconnection appeared almost immediate | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Manual resubscribe during Wi-Fi toggle | Should not be needed | Not needed | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Closing subscription tab | New tab must subscribe again | Manual resubscription required | <span style="color:#16a34a"><strong>Expected</strong></span> |
-| Offline event behavior | GPS Broadcast may drop messages | Sent count exceeded received count during offline periods | <span style="color:#f59e0b"><strong>Expected constraint</strong></span> |
-| Durable stop-log listener | Stop-log insert fires separate event | `stop_logs` Postgres Changes listener fired | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Prototype load | Page opens locally | Browser QA loaded page successfully (`/002-supabase-realtime-split/`) and logged `page-loaded` with Supabase CDN detected | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Config validation guard | Missing credentials should fail safely | Browser QA `Connect/Start/Subscribe` without URL+anon key yielded controlled `connect-failed` log with reason `missing URL or anon key` | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Browser console/runtime behavior | No hard crash while misconfigured | UI remained interactive and surfaced validation state (`Status: missing URL or anon key`) | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Broadcast GPS | Subscriber receives live positions when configured | Prior spike run validated this on desktop with project credentials; not rerunnable in this pass because secrets were intentionally absent | <span style="color:#f59e0b"><strong>Not rerun in this pass</strong></span> |
+| Wi-Fi offline/online reconnect | Reconnect without manual user action | Prior run observed near-immediate reconnect; this pass did not include authenticated channels | <span style="color:#f59e0b"><strong>Not rerun in this pass</strong></span> |
+| Manual resubscribe during Wi-Fi toggle | Should not be needed | Prior run: not needed; this pass did not include authenticated channels | <span style="color:#f59e0b"><strong>Not rerun in this pass</strong></span> |
+| Closing subscription tab | New tab must subscribe again | Prior run: manual resubscription required/expected | <span style="color:#16a34a"><strong>Expected</strong></span> |
+| Offline event behavior | GPS Broadcast may drop messages | Prior run: sent > received during offline periods (expected for ephemeral transport) | <span style="color:#f59e0b"><strong>Expected constraint</strong></span> |
+| Durable stop-log listener | Stop-log insert fires separate event when configured | Prior run validated `stop_logs` Postgres Changes path; this pass not authenticated | <span style="color:#f59e0b"><strong>Not rerun in this pass</strong></span> |
 | Tablet/mobile network | Same behavior on target runtime | Not tested yet | <span style="color:#f59e0b"><strong>Pending</strong></span> |
 
 ## Findings

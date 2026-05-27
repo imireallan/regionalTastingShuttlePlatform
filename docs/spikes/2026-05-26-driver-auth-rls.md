@@ -83,6 +83,7 @@ Prototype model:
 
 | Test area | Expected | Observed | Status |
 |---|---|---|---|
+| Browser artifact presence | Browser QA should expose runnable UI if this were a browser prototype | `http://localhost:4189/003-driver-auth-rls/` shows directory listing (`README.md`, `schema.sql`, `test-plan.md`) — this spike is SQL/RLS, not interactive UI | <span style="color:#16a34a"><strong>Expected</strong></span> |
 | Alice sign-in | Internal alias + PIN/password signs in | Worked | <span style="color:#16a34a"><strong>Pass</strong></span> |
 | Read own context | Alice sees only her active assignment | Worked via `spike_my_driver_context` | <span style="color:#16a34a"><strong>Pass</strong></span> |
 | Valid stop-log insert | Alice can write assigned bus/route | Insert succeeded | <span style="color:#16a34a"><strong>Pass</strong></span> |

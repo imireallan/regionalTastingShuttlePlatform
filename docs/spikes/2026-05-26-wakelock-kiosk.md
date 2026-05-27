@@ -79,12 +79,15 @@ The prototype tracks:
 
 | Test area | Expected | Observed | Status |
 |---|---|---|---|
-| Static prototype load | Page opens locally | HTTP 200, smoke test passed | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Wake Lock desktop behavior | Screen should remain awake while active | Wake Lock stayed active and desktop screen did not shut down up to current observation point | <span style="color:#16a34a"><strong>Pass on desktop</strong></span> |
+| Static prototype load | Page opens locally | Browser QA loaded page successfully (`/001-wakelock-kiosk/`) and event log started with `page-loaded` | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Wake Lock request flow | Wake lock can be requested from UI | Browser QA click on `Request wake lock` logged `wake-lock-acquired`; metric showed `WAKE LOCK = active` | <span style="color:#16a34a"><strong>Pass (desktop/headless)</strong></span> |
+| Tracking heartbeat loop | Timer loop emits periodic heartbeats | Browser QA `Start tracking` produced `heartbeat` with low drift (`2ms`) | <span style="color:#16a34a"><strong>Pass (desktop/headless)</strong></span> |
+| Geolocation permission handling | Permission failure is visible/logged | Browser QA returned `GEOLOCATION = permission denied` and logged `geolocation-error` (code 1) without JS crash | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Browser console health | No runtime JS errors during interactions | Browser QA console showed only structured logs; `js_errors: []` | <span style="color:#16a34a"><strong>Pass</strong></span> |
 | Android tablet long run | 4-8 hour tablet/Fully Kiosk run | Not tested yet | <span style="color:#f59e0b"><strong>Pending</strong></span> |
 | Fully Kiosk behavior | Browser stays active, GPS/timers continue | Not tested yet | <span style="color:#f59e0b"><strong>Pending</strong></span> |
 | Battery/thermal behavior | No overheating or drain while plugged in | Not tested yet | <span style="color:#f59e0b"><strong>Pending</strong></span> |
-| Permission recovery | Denied/recovered geolocation is understandable | Not tested yet on tablet | <span style="color:#f59e0b"><strong>Pending</strong></span> |
+| Permission recovery on tablet | Denied/recovered geolocation is understandable in target runtime | Not tested yet on tablet | <span style="color:#f59e0b"><strong>Pending</strong></span> |
 
 ## Findings
 

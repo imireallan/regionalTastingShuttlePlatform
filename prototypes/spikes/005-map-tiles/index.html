@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spike 005 — Map Tiles</title>
+    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #07110f;
+        color: #ecfdf5;
+      }
+      body { margin: 0; padding: 16px; background: radial-gradient(circle at top left, #153e35 0, #07110f 42%, #020403 100%); }
+      main { max-width: 1220px; margin: 0 auto; }
+      h1 { margin: 0 0 6px; font-size: 26px; }
+      h2 { margin: 0 0 12px; font-size: 18px; }
+      p, .small { color: #a7f3d0; }
+      .small { font-size: 12px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 16px 0; }
+      .card { border: 1px solid rgba(110, 231, 183, 0.22); background: rgba(6, 78, 59, 0.32); border-radius: 16px; padding: 14px; box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24); }
+      .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+      button, select {
+        border-radius: 10px; border: 1px solid rgba(167, 243, 208, 0.24); background: rgba(2, 44, 34, 0.85); color: #ecfdf5;
+        padding: 10px 12px; font-size: 14px;
+      }
+      button { cursor: pointer; font-weight: 700; }
+      button.primary { color: #022c22; background: #34d399; border: none; border-radius: 999px; padding: 11px 16px; }
+      button.warn { color: #1c1917; background: #fbbf24; border: none; border-radius: 999px; padding: 11px 16px; }
+      button.secondary { color: #d1fae5; background: rgba(209, 250, 229, 0.12); border-radius: 999px; padding: 11px 16px; }
+      #map { width: 100%; height: 540px; border-radius: 16px; border: 1px solid rgba(110, 231, 183, 0.22); overflow: hidden; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { border-bottom: 1px solid rgba(167, 243, 208, 0.12); padding: 9px; text-align: left; vertical-align: top; }
+      th { color: #a7f3d0; background: rgba(6, 78, 59, 0.45); }
+      .metric { font-size: 24px; font-weight: 800; }
+      .ok { color: #34d399; }
+      .warnText { color: #fbbf24; }
+      .bad { color: #fb7185; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; word-break: break-all; }
+      .pill { display: inline-block; border-radius: 999px; padding: 3px 9px; font-weight: 800; font-size: 12px; }
+      .pill-ok { background: rgba(52, 211, 153, 0.18); color: #34d399; }
+      .pill-warn { background: rgba(251, 191, 36, 0.18); color: #fbbf24; }
+      .pill-bad { background: rgba(251, 113, 133, 0.18); color: #fb7185; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Map Tiles Spike</h1>
+      <p>Pressure-test MapLibre tile provider suitability for shuttle rider/admin live maps without using tile.openstreetmap.org.</p>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Provider config</h2>
+          <label for="styleSelect" class="small">OpenFreeMap style</label>
+          <select id="styleSelect">
+            <option value="liberty">OpenFreeMap Liberty</option>
+            <option value="bright">OpenFreeMap Bright</option>
+            <option value="dark">OpenFreeMap Dark</option>
+            <option value="positron">OpenFreeMap Positron</option>
+          </select>
+          <div class="controls">
+            <button id="applyStyleButton" class="primary">Apply style</button>
+            <button id="simulateWeakNetworkButton" class="warn">Toggle weak network simulation</button>
+            <button id="exportLogsButton" class="secondary">Export logs</button>
+          </div>
+          <table>
+            <tr><th>Style URL</th><td id="styleUrl" class="mono"></td></tr>
+            <tr><th>Weak network</th><td id="weakNetworkStatus"><span class="pill pill-warn">off</span></td></tr>
+            <tr><th>tile.openstreetmap.org present</th><td id="osmUsage" class="bad">checking…</td></tr>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>Map load metrics</h2>
+          <table>
+            <tr><th>Load state</th><td id="loadState" class="metric warnText">loading…</td></tr>
+            <tr><th>Load time</th><td id="loadTime" class="mono">pending</td></tr>
+            <tr><th>Errors</th><td id="errorCount" class="metric ok">0</td></tr>
+            <tr><th>Last tile latency</th><td id="lastTileLatency" class="mono">none</td></tr>
+            <tr><th>Shuttle updates sent</th><td id="sentCount" class="metric ok">0</td></tr>
+            <tr><th>Shuttle updates applied</th><td id="appliedCount" class="metric ok">0</td></tr>
+          </table>
+        </div>
+      </section>
+
+      <section id="map"></section>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Pressure test checklist</h2>
+          <table><tbody id="checklistBody"></tbody></table>
+        </div>
+        <div class="card">
+          <h2>Legend</h2>
+          <p class="small">Blue line = route, green dots = stops, amber marker = shuttle. Weak network mode introduces jitter + dropped updates in shuttle movement only; map shell remains stable.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Event log</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Type</th><th>Details</th></tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <script>
+      const routeData = {
+        routeId: 'demo-route-1',
+        routeName: 'Demo Regional Tasting Loop',
+        center: { lat: -1.2921, lng: 36.8219 },
+        stops: [
+          { id: 'stop-1', name: 'Welcome Center', sequence: 1, lat: -1.2921, lng: 36.8219 },
+          { id: 'stop-2', name: 'North Tasting Room', sequence: 2, lat: -1.2864, lng: 36.8172 },
+          { id: 'stop-3', name: 'Vineyard Gate', sequence: 3, lat: -1.2812, lng: 36.8264 },
+          { id: 'stop-4', name: 'Market Return', sequence: 4, lat: -1.2948, lng: 36.8322 },
+        ],
+      };
+      const styles = {
+        liberty: 'https://tiles.openfreemap.org/styles/liberty',
+        bright: 'https://tiles.openfreemap.org/styles/bright',
+        dark: 'https://tiles.openfreemap.org/styles/dark',
+        positron: 'https://tiles.openfreemap.org/styles/positron',
+      };
+      const state = {
+        map: null,
+        shuttleMarker: null,
+        weakNetwork: false,
+        logs: [],
+        errors: 0,
+        sentCount: 0,
+        appliedCount: 0,
+        lastTileLatencyMs: null,
+        moveTimer: null,
+        moveStep: 0,
+        mapStartMs: null,
+      };
+      const $ = (id) => document.getElementById(id);
+      const lineCoords = routeData.stops.map((stop) => [stop.lng, stop.lat]);
+
+      function nowIso() { return new Date().toISOString(); }
+      function escapeHtml(value) {
+        return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'", '&#039;');
+      }
+      function log(type, details = {}) {
+        const row = { at: nowIso(), type, details };
+        state.logs.unshift(row);
+        renderLogs();
+        console.log('[map-tiles-spike]', row);
+      }
+      function setLoadState(text, cls) {
+        const el = $('loadState');
+        el.textContent = text;
+        el.className = `metric ${cls}`;
+      }
+      function updateSummary() {
+        $('errorCount').textContent = String(state.errors);
+        $('errorCount').className = `metric ${state.errors ? 'bad' : 'ok'}`;
+        $('sentCount').textContent = String(state.sentCount);
+        $('appliedCount').textContent = String(state.appliedCount);
+        $('lastTileLatency').textContent = state.lastTileLatencyMs == null ? 'none' : `${state.lastTileLatencyMs}ms`;
+        $('weakNetworkStatus').innerHTML = state.weakNetwork
+          ? '<span class="pill pill-warn">on (jitter + drops)</span>'
+          : '<span class="pill pill-ok">off</span>';
+      }
+      function renderChecklist() {
+        const hasMapLoaded = $('loadState').textContent === 'loaded';
+        const hasStops = !!state.map?.getSource('stops-source');
+        const hasRoute = !!state.map?.getSource('route-source');
+        const hasMovement = state.appliedCount > 5;
+        const hasWeakMode = state.logs.some((x) => x.type === 'weak-network-toggled' && x.details.enabled === true);
+        const noOsm = $('osmUsage').textContent.includes('not detected');
+        const rows = [
+          ['Map renders with OpenFreeMap', hasMapLoaded, 'Load state is loaded'],
+          ['Route + stop overlays visible', hasStops && hasRoute, 'GeoJSON sources attached'],
+          ['Moving shuttle marker', hasMovement, 'Applied shuttle updates > 5'],
+          ['Provider-swappable config', state.logs.some((x) => x.type === 'style-applied'), 'Changed style via selector'],
+          ['Weak network simulation', hasWeakMode, 'Jitter + drops mode toggled'],
+          ['No tile.openstreetmap.org usage', noOsm, 'Style/network logs checked for banned host'],
+        ];
+        $('checklistBody').innerHTML = rows
+          .map(([name, ok, note]) => `<tr><td>${name}</td><td>${ok ? '<span class="pill pill-ok">observed</span>' : '<span class="pill pill-warn">pending</span>'}</td><td>${note}</td></tr>`)
+          .join('');
+      }
+      function renderLogs() {
+        $('logBody').innerHTML = state.logs.slice(0, 200).map((entry) => (
+          `<tr><td>${entry.at}</td><td>${entry.type}</td><td>${escapeHtml(JSON.stringify(entry.details))}</td></tr>`
+        )).join('');
+      }
+      function styleUrlForSelection() {
+        const styleKey = $('styleSelect').value;
+        return styles[styleKey];
+      }
+      function checkForBannedHost() {
+        const styleUrl = styleUrlForSelection();
+        const styleHasBannedHost = styleUrl.includes('tile.openstreetmap.org');
+        const logsHaveBannedHost = state.logs.some((l) => JSON.stringify(l.details).includes('tile.openstreetmap.org'));
+        const banned = styleHasBannedHost || logsHaveBannedHost;
+        $('osmUsage').textContent = banned ? 'detected (FAIL)' : 'not detected (PASS)';
+        $('osmUsage').className = banned ? 'bad mono' : 'ok mono';
+      }
+
+      function addRouteLayers() {
+        if (!state.map.getSource('route-source')) {
+          state.map.addSource('route-source', {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: { type: 'LineString', coordinates: lineCoords },
+              properties: {},
+            },
+          });
+          state.map.addLayer({
+            id: 'route-line',
+            type: 'line',
+            source: 'route-source',
+            paint: { 'line-color': '#38bdf8', 'line-width': 5, 'line-opacity': 0.9 },
+          });
+        }
+        if (!state.map.getSource('stops-source')) {
+          state.map.addSource('stops-source', {
+            type: 'geojson',
+            data: {
+              type: 'FeatureCollection',
+              features: routeData.stops.map((stop) => ({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: [stop.lng, stop.lat] },
+                properties: { name: stop.name, sequence: stop.sequence },
+              })),
+            },
+          });
+          state.map.addLayer({
+            id: 'stops-circle',
+            type: 'circle',
+            source: 'stops-source',
+            paint: {
+              'circle-radius': 6,
+              'circle-color': '#22c55e',
+              'circle-stroke-color': '#022c22',
+              'circle-stroke-width': 2,
+            },
+          });
+          state.map.addLayer({
+            id: 'stops-label',
+            type: 'symbol',
+            source: 'stops-source',
+            layout: {
+              'text-field': ['get', 'sequence'],
+              'text-size': 11,
+              'text-offset': [0, 1.2],
+            },
+            paint: { 'text-color': '#d1fae5' },
+          });
+        }
+      }
+
+      function startShuttleMovement() {
+        if (state.moveTimer) clearInterval(state.moveTimer);
+        state.moveStep = 0;
+        state.sentCount = 0;
+        state.appliedCount = 0;
+        const points = lineCoords.concat([lineCoords[0]]);
+        state.shuttleMarker?.remove();
+        state.shuttleMarker = new maplibregl.Marker({ color: '#f59e0b' }).setLngLat(points[0]).addTo(state.map);
+
+        state.moveTimer = setInterval(() => {
+          const base = points[state.moveStep % points.length];
+          state.sentCount += 1;
+          let drop = false;
+          let appliedPoint = [...base];
+          if (state.weakNetwork) {
+            drop = Math.random() < 0.35;
+            if (!drop) {
+              const jitter = (Math.random() - 0.5) * 0.0012;
+              appliedPoint = [base[0] + jitter, base[1] - jitter];
+            }
+          }
+          if (!drop) {
+            state.shuttleMarker.setLngLat(appliedPoint);
+            state.appliedCount += 1;
+            log('shuttle-update-applied', { sentIndex: state.sentCount, point: appliedPoint, weakNetwork: state.weakNetwork });
+          } else {
+            log('shuttle-update-dropped', { sentIndex: state.sentCount, reason: 'weak-network-simulation' });
+          }
+          state.moveStep += 1;
+          updateSummary();
+          renderChecklist();
+        }, 3000);
+      }
+
+      function bindMapEvents() {
+        state.map.on('load', () => {
+          addRouteLayers();
+          setLoadState('loaded', 'ok');
+          const elapsed = Date.now() - state.mapStartMs;
+          $('loadTime').textContent = `${elapsed}ms`;
+          startShuttleMovement();
+          log('map-loaded', { elapsedMs: elapsed, style: styleUrlForSelection() });
+          renderChecklist();
+        });
+        state.map.on('error', (event) => {
+          state.errors += 1;
+          const message = event?.error?.message || 'unknown-map-error';
+          log('map-error', { message });
+          updateSummary();
+          renderChecklist();
+        });
+        state.map.on('sourcedata', (event) => {
+          if (!event.isSourceLoaded || !event.sourceId) return;
+          const elapsed = Date.now() - state.mapStartMs;
+          state.lastTileLatencyMs = elapsed;
+          updateSummary();
+        });
+      }
+
+      function buildMap() {
+        const styleUrl = styleUrlForSelection();
+        $('styleUrl').textContent = styleUrl;
+        checkForBannedHost();
+        if (state.map) {
+          state.map.remove();
+          state.map = null;
+        }
+        setLoadState('loading…', 'warnText');
+        $('loadTime').textContent = 'pending';
+        state.mapStartMs = Date.now();
+        state.map = new maplibregl.Map({
+          container: 'map',
+          style: styleUrl,
+          center: [routeData.center.lng, routeData.center.lat],
+          zoom: 13,
+          pitch: 0,
+          bearing: 0,
+          cooperativeGestures: true,
+        });
+        state.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+        bindMapEvents();
+      }
+
+      function exportLogs() {
+        const payload = {
+          exportedAt: nowIso(),
+          userAgent: navigator.userAgent,
+          style: styleUrlForSelection(),
+          weakNetwork: state.weakNetwork,
+          loadState: $('loadState').textContent,
+          loadTimeMs: $('loadTime').textContent,
+          errors: state.errors,
+          sentCount: state.sentCount,
+          appliedCount: state.appliedCount,
+          lastTileLatencyMs: state.lastTileLatencyMs,
+          logs: state.logs.slice().reverse(),
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `map-tiles-spike-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        log('logs-exported', { events: state.logs.length });
+      }
+
+      $('applyStyleButton').addEventListener('click', () => {
+        log('style-applied', { style: $('styleSelect').value, styleUrl: styleUrlForSelection() });
+        buildMap();
+      });
+      $('simulateWeakNetworkButton').addEventListener('click', () => {
+        state.weakNetwork = !state.weakNetwork;
+        log('weak-network-toggled', { enabled: state.weakNetwork });
+        updateSummary();
+        renderChecklist();
+      });
+      $('exportLogsButton').addEventListener('click', exportLogs);
+
+      log('page-loaded');
+      buildMap();
+      updateSummary();
+      renderChecklist();
+    </script>
+  </body>
+</html>

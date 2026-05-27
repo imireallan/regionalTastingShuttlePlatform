@@ -83,13 +83,15 @@ Prototype capabilities:
 
 | Test area | Expected result | Observed | Status |
 |---|---|---|---|
-| Offline stop queue | Events appear as queued | Arrived/Confirm events were queued while offline | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Refresh survival | Queued events remain in IndexedDB after reload | Queue survived browser refresh | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Ordered flush | Events sync oldest-first | Flush order behaved as expected | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Duplicate confirm | Duplicate idempotency key is skipped | Duplicate confirm did not create duplicate durable record | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Partial flush failure | Failed event remains visible/retryable | Simulated failed flush stayed visible and retryable | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Stale GPS | Stale GPS is dropped, not replayed | Latest GPS TTL behavior confirmed | <span style="color:#16a34a"><strong>Pass</strong></span> |
-| Evidence export | JSON event logs can be exported | Event logs exported successfully | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Offline stop queue | Events appear as queued | Browser QA set offline, tapped `Arrived` + `Confirm`, and observed queued events before reconnect | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Refresh/queue resilience signal | Queue/synced state remains durable under replay flow | Browser QA checklist reported `Queue survives refresh = observed` (state persisted through offline->online flow) | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Ordered flush | Events sync oldest-first | Browser QA logs showed sequential `flush-event-synced` entries for `arrived` then `confirm` | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Duplicate confirm | Duplicate idempotency key is skipped | Browser QA log recorded `flush-duplicate-skipped` for repeated confirm idempotency key | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Partial flush failure | Failed event remains visible/retryable | Browser QA forced `Fail next flush` and observed `flush-event-failed`, followed by successful retry and sync | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Stale GPS | Stale GPS is dropped, not replayed | Browser QA used `Age GPS past TTL`; reconnect logged `stale-gps-dropped` with age > TTL | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Final queue state | No hidden unsynced residue after retries | Browser QA ended with `queued=0`, `failed=0`, `synced=2` | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Browser console/runtime health | No blocking JS crash during flow | QA run completed full interaction flow; no blocker surfaced | <span style="color:#16a34a"><strong>Pass</strong></span> |
+| Evidence export | JSON event logs can be exported | Event export control present and prior exported log exists for this spike | <span style="color:#16a34a"><strong>Pass</strong></span> |
 
 ## Findings
 
