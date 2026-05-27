@@ -18,6 +18,7 @@ Then open:
 - Supabase Realtime Split: http://localhost:4173/002-supabase-realtime-split/
 - IndexedDB Buffer/Flush: http://localhost:4173/004-indexeddb-buffer-flush/
 - Map Tiles: http://localhost:4173/005-map-tiles/
+- Schedule ETA: run `node prototypes/spikes/006-schedule-eta/fixtures-and-tests.mjs`
 
 Notes:
 
